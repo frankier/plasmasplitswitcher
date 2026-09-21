@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Shell syntax and ShellCheck
+        run: |
+          bash -n install.sh
+          for script in tools/*.sh; do
+              bash -n "$script"
+          done
+          shellcheck --severity=warning --external-sources install.sh tools/*.sh
+
+      - name: JavaScript syntax
+        run: |
+          for script in script/contents/code/main.js tools/nested/*.js \
+                        tools/reset-skip-switcher.js; do
+              node --check "$script"
+          done
+
+      - name: Python syntax
+        run: python3 -m py_compile tools/xtest-inject.py
+
+      - name: KPackage metadata
+        run: |
+          python3 -c '
+          import json, pathlib
+
+          packages = {
+              "switcher/metadata.json": "KWin/WindowSwitcher",
+              "script/metadata.json": "KWin/Script",
+          }
+          for path, structure in packages.items():
+              data = json.loads(pathlib.Path(path).read_text())
+              assert data["KPackageStructure"] == structure, path
+              assert data["KPlugin"]["Id"] == "plasmasplitswitcher", path
+              for key in ("Name", "Version", "License"):
+                  assert data["KPlugin"].get(key), (path, key)
+              assert data.get("X-Plasma-API"), path
+
+          script = json.loads(pathlib.Path("script/metadata.json").read_text())
+          entry = pathlib.Path("script") / "contents" / script["X-Plasma-MainScript"]
+          assert entry.is_file(), entry
+          print("package metadata OK")
+          '
+
+  nested-test:
+    name: Nested KWin (${{ matrix.layout }}, ${{ matrix.grouping }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layout: columns
+            grouping: columns
+          - layout: 2x2
+            grouping: columns
+          - layout: 2x2
+            grouping: rows
+          - layout: 2x2
+            grouping: regions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The test needs a current KWin, so it runs in a Fedora container on the
+      # Ubuntu runner instead of in a container job.  A job container would be
+      # simpler, but `actions/checkout` needs git, which the Fedora image does
+      # not ship.
+      - name: Run the headless test against KWin 6.7
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo fedora:44 bash -c '
+          set -euo pipefail
+
+          dnf install -y --setopt=install_weak_deps=False \
+              kwin xorg-x11-server-Xvfb dbus-daemon kglobalaccel foot \
+              kf6-kpackage qt6-qttools systemd python3-xlib > /dev/null
+
+          # kwin_wayland ships with the cap_sys_nice file capability, which a
+          # container cannot acquire from the default capability set.  KWin
+          # runs fine without it, so drop the capability instead of asking for
+          # a privileged container.
+          setcap -r /usr/bin/kwin_wayland
+
+          rpm -q kwin
+          bash tools/nested-test.sh --layout ${{ matrix.layout }} \
+                                    --grouping ${{ matrix.grouping }}
+          '

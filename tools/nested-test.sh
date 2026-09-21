@@ -128,6 +128,17 @@ pick_display() {
 }
 
 run_dir="$(mktemp -d "${TMPDIR:-/tmp}/plasmasplitswitcher-test.XXXXXX")"
+
+# KWin and its clients require a private runtime directory.  Reuse the
+# caller's, but fall back to one inside the test directory when there is none
+# (headless runs, CI containers).
+if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -d "${XDG_RUNTIME_DIR}" ]]; then
+    XDG_RUNTIME_DIR="$run_dir/runtime"
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+    export XDG_RUNTIME_DIR
+fi
+
 display="$(pick_display)" || {
     printf 'error: no free X display found\n' >&2
     exit 1
@@ -199,12 +210,14 @@ export XDG_DATA_HOME="$run_dir/data"
 export XDG_CURRENT_DESKTOP=KDE
 export DISPLAY="$display"
 export WAYLAND_DISPLAY="$socket"
+# Without this KWin logs through journald, which is absent in containers; the
+# nested session's console output would be lost.  Force it to stderr instead.
+export QT_FORCE_STDERR_LOGGING=1
 
 /usr/libexec/kglobalacceld >> "$run_dir/log/session.log" 2>&1 &
 /usr/bin/env kwin_wayland --x11-display "$display" --socket "$socket" \
     --width 1600 --height 900 >> "$run_dir/log/session.log" 2>&1 &
 kwin_pid=\$!
-echo "\$kwin_pid" > "$run_dir/kwin.pid"
 trap 'kill -TERM \$kwin_pid 2>/dev/null' EXIT
 
 for _ in \$(seq 1 60); do
@@ -255,12 +268,19 @@ for _ in $(seq 1 120); do
     sleep 0.5
 done
 
-kwin_pid="$(cat "$run_dir/kwin.pid" 2>/dev/null || true)"
+# KWin logs script console output through the Qt "js" category.  In the
+# journal the prefix is dropped, on stderr it is kept as "js: ", so strip any
+# such prefix before matching.
+collect_results() {
+    sed -E 's/^[A-Za-z0-9_.]+: //' | grep -E '^(PSSDUMP|PSSNESTED) ' || true
+}
+
 results="$(journalctl --since "$start_ts" --no-pager -o cat 2>/dev/null \
-    | grep -E '^PSSDUMP |^PSSNESTED ' || true)"
+    | collect_results)"
 if [[ -z "$results" ]]; then
     # Some setups send console output to the compositor's stderr instead.
-    results="$(grep -E '^PSSDUMP |^PSSNESTED ' "$run_dir/log/session.log" 2>/dev/null || true)"
+    results="$(grep -E 'PSSDUMP |PSSNESTED ' "$run_dir/log/session.log" 2>/dev/null \
+        | collect_results)"
 fi
 
 if [[ -z "$results" ]]; then
@@ -319,6 +339,10 @@ if (( skipped != expected_hidden )); then
     printf 'FAIL: expected the %s windows outside the group to be hidden, got %s\n' \
         "$expected_hidden" "$skipped" >&2
     status=1
+fi
+
+if (( status != 0 )); then
+    printf '\ncollected output:\n%s\n' "$results" >&2
 fi
 
 if (( status == 0 )); then

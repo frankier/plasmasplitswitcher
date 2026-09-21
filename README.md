@@ -168,7 +168,21 @@ that group's windows are offered.  `--layout` selects the tiling tree and
 
 Requirements: `kwin_wayland`, `Xvfb`, `dbus-run-session`, `kglobalacceld`,
 `foot`, `kpackagetool6`, `qdbus`, `journalctl`, and `python3` with
-`python-xlib`.
+`python-xlib`.  The test creates its own `XDG_RUNTIME_DIR` when there is none
+and forces KWin to log to stderr, so it also runs in a container.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs two jobs on every push to `main` and every
+pull request:
+
+- **Static checks** run ShellCheck, `bash -n`, `node --check` on the KWin
+  JavaScript, `py_compile` on the XTEST helper, and validate both package
+  metadata files.
+- **Nested KWin** runs the headless test above for `--layout columns`,
+  `--layout 2x2`, `--layout 2x2 --grouping rows` and
+  `--layout 2x2 --grouping regions`.  It runs in a `fedora:44` container on the
+  Ubuntu runner, so the test always sees a current KWin.
 
 ### Upstream drift
 

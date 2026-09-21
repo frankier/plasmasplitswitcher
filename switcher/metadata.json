@@ -20,7 +20,7 @@
         "Id": "plasmasplitswitcher",
         "License": "GPL-2.0-or-later",
         "Name": "Plasma Split Switcher",
-        "Version": "1.0"
+        "Version": "1.1"
     },
     "X-Plasma-API": "declarativeappletscript"
 }

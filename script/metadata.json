@@ -12,8 +12,9 @@
         "Id": "plasmasplitswitcher",
         "License": "GPL-2.0-or-later",
         "Name": "Plasma Split Switcher",
-        "Version": "1.0"
+        "Version": "1.1"
     },
+    "X-KDE-ConfigModule": "kwin/effects/configs/kcm_kwin4_genericscripted",
     "X-Plasma-API": "javascript",
     "X-Plasma-MainScript": "code/main.js"
 }

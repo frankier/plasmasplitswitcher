@@ -1,5 +1,18 @@
 # PLAN — Plasma Split Switcher (per-column Alt+Tab for KWin tiling)
 
+> **Update (grouping modes).** The switcher no longer always groups by column.
+> The KWin script reads a `Grouping` setting from its settings panel (System
+> Settings > Window Management > KWin Scripts > Plasma Split Switcher >
+> Configure): `columns` (default), `rows`, or `regions`.  `columns` and `rows`
+> are geometric, so a 2x2 grid is split into left/right columns (or top/bottom
+> rows) regardless of how KWin nested the tiles; `regions` is the original
+> tree-based behaviour described below.  The switcher QML no longer resolves
+> the group itself: it derives the popup region from the `skipSwitcher` flags
+> the script sets on the windows, so the popup follows the setting without the
+> QML having to read it (the tabbox QML cannot read a script's configuration).
+> Sections 3.1, 4, 5 and 6 below describe the original column-only design and
+> are kept for history.
+
 Per-column window switcher for KWin 6.7: Alt+Tab behaves exactly like Plasma's
 normal switcher, except that when the focused window is inside a tiled column the
 list is limited to that column and the popup is centred/sized inside the column,

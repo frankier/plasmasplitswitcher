@@ -188,6 +188,7 @@ if "$uninstall"; then
     write_config TabBoxAlternative LayoutName "$stock_layout"
     delete_config TabBox HighlightWindows
     delete_config TabBoxAlternative HighlightWindows
+    delete_config "Script-$plugin_id" Grouping
     write_config Plugins "${plugin_id}Enabled" false
 
     reconfigure_kwin
@@ -242,7 +243,10 @@ Done.
 
 Both artifacts are required:
   * the KWin script filters the window list (skipSwitcher),
-  * the WindowSwitcher layout positions the popup on the column.
+  * the WindowSwitcher layout positions the popup on the group.
+
+The grouping can be changed in System Settings > Window Management > KWin
+Scripts > Plasma Split Switcher > Configure (Columns by default).
 
 To go back to stock:
   ./install.sh --uninstall

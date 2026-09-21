@@ -26,29 +26,32 @@ KWin.TabBoxSwitcher {
     id: tabBox
 
     // --- plasmasplitswitcher patch: begin ---
-    // The rectangle the popup is centred in and clamped to: the tiling column
-    // of the focused window, or the whole screen when there is no column.
-    // Tile.absoluteGeometry is already in global workspace coordinates, so it
-    // can be compared with TabBoxSwitcher.screenGeometry directly.
+    // The rectangle the popup is centred in and clamped to: the bounding box
+    // of the focused window's switcher group, or the whole screen when there
+    // is no group.
+    //
+    // The script package owns the grouping (and its settings panel) and marks
+    // every window outside the group with `skipSwitcher = true`.  This QML
+    // cannot read the script configuration, so it recovers the group from
+    // those flags instead: the windows the switcher offers, restricted to the
+    // focused window's tile tree.  That keeps the popup in sync with every
+    // grouping mode without duplicating the setting.
     readonly property var switcherArea: {
-        const column = columnTileFor(KWin.Workspace.activeWindow);
-        if (!column) {
-            return tabBox.screenGeometry;
-        }
-        const geometry = column.absoluteGeometry;
-        return Qt.rect(geometry.x, geometry.y, geometry.width, geometry.height);
+        const area = switcherAreaFor(KWin.Workspace.activeWindow);
+        return area !== null ? area : tabBox.screenGeometry;
     }
 
-    // Returns the tiling column that contains `w`, or null when `w` is not in a
-    // column.
+    // Returns the bounding box of the focused window's group, or null when
+    // there is no group (floating, quick-tiled, single tile, no tiling).
     //
-    // A column is the direct child of the root tile that contains `w`, but only
-    // when the root tile splits its children side by side.  Layouts whose root
-    // tile splits into full-width rows, floating windows, quick-tiled windows
-    // and single-tile layouts all return null, which keeps the stock switcher.
+    // Windows in another desktop or on another output live in a different root
+    // tile and are ignored.  Tile.absoluteGeometry is already in global
+    // workspace coordinates, so it can be compared with
+    // TabBoxSwitcher.screenGeometry directly.
     //
-    // Keep this in sync with columnTileForWindow() in script/contents/code/main.js.
-    function columnTileFor(w) {
+    // Keep the "no group" conditions in sync with groupWindowsFor() in
+    // script/contents/code/main.js.
+    function switcherAreaFor(w) {
         if (!w) {
             return null;
         }
@@ -64,24 +67,44 @@ KWin.TabBoxSwitcher {
         if (root === leaf) {
             return null; // a single tile filling the screen
         }
-
-        let column = leaf;
-        while (column.parent && column.parent !== root) {
-            column = column.parent;
-        }
-        if (column.parent !== root) {
-            return null;
+        if (!root.tiles || root.tiles.length < 2) {
+            return null; // nothing to group
         }
 
-        // Only Tile properties are used on purpose: `layoutDirection` lives on
-        // CustomTile and is not guaranteed.  A direct child that is narrower
-        // than the root has to be a column.
-        const rootGeometry = root.relativeGeometry;
-        const columnGeometry = column.relativeGeometry;
-        if (!(columnGeometry.width < rootGeometry.width - 0.0001)) {
-            return null; // the root splits into rows, not columns
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        const windows = KWin.Workspace.windows;
+        for (let i = 0; i < windows.length; ++i) {
+            const other = windows[i];
+            if (!other || other.skipSwitcher) {
+                continue;
+            }
+            const tile = other.tile;
+            if (!tile) {
+                continue;
+            }
+            let otherRoot = tile;
+            while (otherRoot.parent) {
+                otherRoot = otherRoot.parent;
+            }
+            if (otherRoot !== root) {
+                continue;
+            }
+            const geometry = tile.absoluteGeometry;
+            minX = Math.min(minX, geometry.x);
+            minY = Math.min(minY, geometry.y);
+            maxX = Math.max(maxX, geometry.x + geometry.width);
+            maxY = Math.max(maxY, geometry.y + geometry.height);
         }
-        return column;
+
+        if (!isFinite(minX)) {
+            // Defensive: a rule forcibly skipped every window of the group.
+            const geometry = leaf.absoluteGeometry;
+            return Qt.rect(geometry.x, geometry.y, geometry.width, geometry.height);
+        }
+        return Qt.rect(minX, minY, maxX - minX, maxY - minY);
     }
     // --- plasmasplitswitcher patch: end ---
 
@@ -93,8 +116,8 @@ KWin.TabBoxSwitcher {
             flags: Qt.Popup | Qt.X11BypassWindowManagerHint
             // --- plasmasplitswitcher patch: begin ---
             // Stock centres on the screen; here it centres on `switcherArea`
-            // and is clamped so it can never spill into a neighbouring column.
-            // With no column, switcherArea is the screen and this is identical
+            // and is clamped so it can never spill into a neighbouring area.
+            // With no group, switcherArea is the screen and this is identical
             // to the stock expression.
             x: Math.round(Math.max(tabBox.switcherArea.x,
                     Math.min(tabBox.switcherArea.x + tabBox.switcherArea.width - dialogMainItem.width,
@@ -110,7 +133,7 @@ KWin.TabBoxSwitcher {
                 focus: true
 
                 // --- plasmasplitswitcher patch: begin ---
-                // Stock uses tabBox.screenGeometry here.  With no column,
+                // Stock uses tabBox.screenGeometry here.  With no group,
                 // switcherArea *is* the screen geometry, so these are
                 // unchanged for floating windows.
                 property int maxWidth: tabBox.switcherArea.width * 0.9
@@ -186,12 +209,12 @@ KWin.TabBoxSwitcher {
                     readonly property int captionRowHeight: Kirigami.Units.gridUnit * 2
                     readonly property int columnSpacing: Kirigami.Units.gridUnit
                     // --- plasmasplitswitcher patch: begin ---
-                    // Shrink the thumbnail cells so that a narrow tiling column
-                    // can fit them.  `usableWidth` is the column width minus the
+                    // Shrink the thumbnail cells so that a narrow group can
+                    // fit them.  `usableWidth` is the group width minus the
                     // item frame and the dialog's own margins; `targetColumns`
                     // is how many cells KWin would like to place side by side.
                     // On a full screen this clamps back to the stock
-                    // Kirigami.Units.gridUnit * 16, so the non-column case is
+                    // Kirigami.Units.gridUnit * 16, so the no-group case is
                     // bit-identical to stock.
                     readonly property real usableWidth: Math.max(0, tabBox.switcherArea.width
                             - hoverItem.margins.left - hoverItem.margins.right

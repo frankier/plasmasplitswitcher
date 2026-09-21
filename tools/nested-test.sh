@@ -4,18 +4,23 @@
 #
 # Runs a complete KWin inside an invisible Xvfb display, so nothing appears on
 # the real screen and the real session keeps its focus.  Inside it:
-#   * builds a two-column tiling layout (left: 1 window, right: 2 windows),
-#   * activates a window of the right column,
+#   * builds a tiling layout,
+#   * activates the window of one group,
 #   * presses the "Walk Through Windows" shortcut with XTEST,
-#   * checks that the popup is centred inside that column and that only the
-#     column's windows are offered by the switcher.
+#   * checks that the popup is centred inside that group and that only the
+#     group's windows are offered by the switcher.
 #
 # Requirements: kwin_wayland, Xvfb, dbus-run-session, kglobalacceld, foot,
 # kpackagetool6, qdbus, journalctl, and python3 with python-xlib
 # (package python3-xlib).
 #
-# Usage: tools/nested-test.sh [--keep]
-#   --keep   keep the temporary directory for inspection
+# Usage: tools/nested-test.sh [--layout columns|2x2] [--grouping columns|rows|regions] [--keep]
+#   --layout columns  left column: 1 window, right column: 2 (default)
+#   --layout 2x2      vertical root, two rows of two columns; the top-left
+#                     must group with the bottom-left in "columns" mode
+#   --grouping MODE   value for [Script-plasmasplitswitcher] Grouping (default
+#                     columns); also sets the independent expectation
+#   --keep            keep the temporary directory for inspection
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -25,12 +30,61 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
 
 keep=false
-if [[ "${1:-}" == "--keep" ]]; then
-    keep=true
-elif [[ -n "${1:-}" ]]; then
-    printf 'error: unknown option: %s\n' "$1" >&2
-    exit 2
-fi
+layout="columns"
+grouping="columns"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --keep)
+            keep=true
+            shift
+            ;;
+        --layout)
+            layout="${2:-}"
+            shift 2
+            ;;
+        --grouping)
+            grouping="${2:-}"
+            shift 2
+            ;;
+        *)
+            printf 'error: unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+plugin_id="plasmasplitswitcher"
+
+case "$grouping" in
+    columns|rows|regions) ;;
+    *)
+        printf 'error: unknown grouping: %s (expected columns, rows or regions)\n' "$grouping" >&2
+        exit 2
+        ;;
+esac
+
+case "$layout" in
+    columns)
+        # root horizontal: left leaf, right column with two stacked leaves.
+        layout_js="$here/nested/layout.js"
+        window_count=3
+        case "$grouping" in
+            rows) expected_offered=1; expected_hidden=2 ;;
+            *)    expected_offered=2; expected_hidden=1 ;;
+        esac
+        ;;
+    2x2)
+        # root vertical, each row split into two columns.
+        layout_js="$here/nested/layout-2x2.js"
+        window_count=4
+        expected_offered=2
+        expected_hidden=2
+        ;;
+    *)
+        printf 'error: unknown layout: %s (expected columns or 2x2)\n' "$layout" >&2
+        exit 2
+        ;;
+esac
 
 first_tool() {
     local tool
@@ -103,7 +157,7 @@ mkdir -p "$run_dir/config" "$run_dir/data" "$run_dir/log"
 # Isolated configuration and packages
 # ---------------------------------------------------------------------------
 
-cat > "$run_dir/config/kwinrc" <<'EOF'
+cat > "$run_dir/config/kwinrc" <<EOF
 [Plugins]
 plasmasplitswitcherEnabled=true
 
@@ -114,12 +168,19 @@ HighlightWindows=false
 [TabBoxAlternative]
 LayoutName=plasmasplitswitcher
 HighlightWindows=false
+
+[Script-$plugin_id]
+Grouping=$grouping
 EOF
 
 cat > "$run_dir/config/kglobalshortcutsrc" <<'EOF'
 [kwin]
 Walk Through Windows=Ctrl+Alt+Shift+F8,Ctrl+Alt+Shift+F8,Walk Through Windows
 EOF
+
+# The oracle must be told which grouping mode the script will read.
+sed "s/var GROUPING = \"columns\";/var GROUPING = \"$grouping\";/" \
+    "$here/nested/dump.js" > "$run_dir/dump.js"
 
 XDG_DATA_HOME="$run_dir/data" kpackagetool6 --type KWin/WindowSwitcher \
     --install "$repo/switcher" >/dev/null
@@ -158,12 +219,12 @@ run_js() {
     sleep 1
 }
 
-foot -T pss-left  >> "$run_dir/log/foot.log" 2>&1 &
-foot -T pss-right >> "$run_dir/log/foot.log" 2>&1 &
-foot -T pss-right >> "$run_dir/log/foot.log" 2>&1 &
+for _ in \$(seq 1 $window_count); do
+    foot -T pss-window >> "$run_dir/log/foot.log" 2>&1 &
+done
 sleep 5
 
-run_js "$here/nested/layout.js" pss-layout
+run_js "$layout_js" pss-layout
 sleep 1
 
 # Hold the shortcut so the switcher stays open while we inspect it.
@@ -172,7 +233,7 @@ python3 "$here/xtest-inject.py" "$display" \
     >> "$run_dir/log/inject.log" 2>&1 &
 inject_pid=\$!
 sleep 2
-run_js "$here/nested/dump.js" pss-dump
+run_js "$run_dir/dump.js" pss-dump
 wait \$inject_pid 2>/dev/null || true
 echo done > "$run_dir/done"
 INNER
@@ -249,18 +310,18 @@ if [[ -n "$column" && -n "$popup" && "$column" != "none" ]]; then
     fi
 fi
 
-if (( not_skipped != 2 )); then
-    printf 'FAIL: expected the 2 windows of the active column to be offered, got %s\n' \
-        "$not_skipped" >&2
+if (( not_skipped != expected_offered )); then
+    printf 'FAIL: expected the %s windows of the active group to be offered, got %s\n' \
+        "$expected_offered" "$not_skipped" >&2
     status=1
 fi
-if (( skipped != 1 )); then
-    printf 'FAIL: expected the 1 window of the other column to be hidden, got %s\n' \
-        "$skipped" >&2
+if (( skipped != expected_hidden )); then
+    printf 'FAIL: expected the %s windows outside the group to be hidden, got %s\n' \
+        "$expected_hidden" "$skipped" >&2
     status=1
 fi
 
 if (( status == 0 )); then
-    printf 'PASS: popup centred inside the column; only the column windows are offered.\n'
+    printf 'PASS: popup centred inside the group; only the group windows are offered.\n'
 fi
 exit "$status"

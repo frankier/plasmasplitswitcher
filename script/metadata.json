@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "frankier@frankier.name",
+                "Name": "Frankie Robertson"
+            }
+        ],
+        "Description": "Restricts the Alt+Tab window list to the tiled column of the focused window",
+        "Icon": "preferences-system-windows-script-test",
+        "Id": "plasmasplitswitcher",
+        "License": "GPL-2.0-or-later",
+        "Name": "Plasma Split Switcher",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

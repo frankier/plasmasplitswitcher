@@ -1,0 +1,26 @@
+{
+    "KPackageStructure": "KWin/WindowSwitcher",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "zrenfire@gmail.com",
+                "Name": "Chris Holland"
+            },
+            {
+                "Email": "nate@kde.org",
+                "Name": "Nate Graham"
+            },
+            {
+                "Email": "frankier@frankier.name",
+                "Name": "Frankie Robertson"
+            }
+        ],
+        "Description": "A thumbnail grid window switcher that is centred on the focused window's tiling column",
+        "Icon": "preferences-system-windows-switcher-thumbnail-grid",
+        "Id": "plasmasplitswitcher",
+        "License": "GPL-2.0-or-later",
+        "Name": "Plasma Split Switcher",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "declarativeappletscript"
+}
